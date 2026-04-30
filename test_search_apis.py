@@ -49,6 +49,51 @@ def validate_response(data: Dict[str, Any]) -> List[str]:
     return errors
 
 
+def value_type(value: Any) -> str:
+    if isinstance(value, list):
+        return f"list[{len(value)}]"
+    if isinstance(value, dict):
+        return f"object[{len(value)}]"
+    if value is None:
+        return "null"
+    return type(value).__name__
+
+
+def compact_value(value: Any, max_length: int) -> str:
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=False)
+    else:
+        text = str(value)
+
+    text = text.replace("\n", "\\n")
+    if len(text) > max_length:
+        return text[: max_length - 3] + "..."
+    return text
+
+
+def print_object_fields(title: str, obj: Any, sample_length: int) -> None:
+    print(f"  {title}:")
+    if not isinstance(obj, dict):
+        print(f"    <{value_type(obj)}>")
+        return
+
+    for key, value in obj.items():
+        print(f"    - {key}: {value_type(value)} = {compact_value(value, sample_length)}")
+
+
+def print_response_format(alias: str, engine: str, data: Dict[str, Any], sample_length: int) -> None:
+    print(f"\n--- {alias} ({engine}) response format ---")
+    print_object_fields("top-level fields", data, sample_length)
+
+    search_intent = data.get("search_intent")
+    first_intent = search_intent[0] if isinstance(search_intent, list) and search_intent else None
+    print_object_fields("search_intent[0] fields", first_intent, sample_length)
+
+    search_result = data.get("search_result")
+    first_result = search_result[0] if isinstance(search_result, list) and search_result else None
+    print_object_fields("search_result[0] fields", first_result, sample_length)
+
+
 def call_search_api(
     url: str,
     api_key: str,
@@ -84,6 +129,17 @@ def main() -> int:
         "--dump-json",
         action="store_true",
         help="print each raw JSON response after validation",
+    )
+    parser.add_argument(
+        "--no-format",
+        action="store_true",
+        help="do not print response format summaries",
+    )
+    parser.add_argument(
+        "--sample-length",
+        type=int,
+        default=120,
+        help="max characters printed for each sample field value",
     )
     args = parser.parse_args()
 
@@ -123,6 +179,13 @@ def main() -> int:
 
             if args.dump_json:
                 print(json.dumps(result["data"], ensure_ascii=False, indent=2))
+            elif not args.no_format:
+                print_response_format(
+                    alias=alias,
+                    engine=engine,
+                    data=result["data"],
+                    sample_length=args.sample_length,
+                )
 
         except requests.exceptions.HTTPError as exc:
             failed.append(alias)
