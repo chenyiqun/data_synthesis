@@ -10,6 +10,8 @@ import requests
 
 DEFAULT_URL = "https://runway.devops.xiaohongshu.com/openai/zhipu/paas/v4/web_search"
 DEFAULT_QUERY = "关节纹太重怎么办"
+DEFAULT_API_KEY = "4325d9d15bb045da86b7178f66890bbb"
+# DEFAULT_API_KEY = "1e6fc76b069c443cb807de0f4373ae16"
 
 SEARCH_APIS: List[Tuple[str, str]] = [
     ("jina", "search_pro_jina"),
@@ -85,9 +87,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    api_key = os.getenv("RUNWAY_API_KEY")
+    api_key = os.getenv("RUNWAY_API_KEY") or DEFAULT_API_KEY
     if not api_key:
-        print("ERROR: please set RUNWAY_API_KEY before running this test.", file=sys.stderr)
+        print("ERROR: please set DEFAULT_API_KEY or RUNWAY_API_KEY.", file=sys.stderr)
         return 2
 
     failed = []
