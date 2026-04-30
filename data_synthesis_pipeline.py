@@ -197,10 +197,16 @@ class DataSynthesizer:
         gpt_client: Optional[GPTApiClient] = None,
         search_client: Optional[RunwaySearchClient] = None,
         config: Optional[SynthesisConfig] = None,
+        verbose: bool = False,
     ) -> None:
         self.gpt_client = gpt_client or GPTApiClient()
         self.search_client = search_client or RunwaySearchClient()
         self.config = config or SynthesisConfig()
+        self.verbose = verbose
+
+    def log(self, message: str) -> None:
+        if self.verbose:
+            print(message, flush=True)
 
     def close(self) -> None:
         self.gpt_client.close()
@@ -218,10 +224,13 @@ class DataSynthesizer:
         chain: List[VerifiedHop] = []
 
         try:
+            self.log(f"  [profile] answer={answer}")
             answer_profile = self.profile_answer(answer)
+            self.log(f"  [profile] {json.dumps(answer_profile, ensure_ascii=False)}")
             current_target = answer
 
             for hop_id in range(1, self.config.target_hops + 1):
+                self.log(f"  [hop {hop_id}] current_target={current_target}")
                 verified_hop = self.build_one_hop(
                     answer=answer,
                     current_target=current_target,
@@ -230,14 +239,30 @@ class DataSynthesizer:
                     answer_profile=answer_profile,
                 )
                 chain.append(verified_hop)
+                self.log(
+                    f"  [hop {hop_id}] accepted new_focus={verified_hop.new_focus} "
+                    f"confidence={verified_hop.confidence:.2f}"
+                )
+                self.log(f"  [hop {hop_id}] question={verified_hop.question_to_current}")
+                self.log(f"  [hop {hop_id}] reason={verified_hop.reason}")
                 current_target = verified_hop.new_focus
 
+            self.log("  [final] generating complex query")
             query = self.generate_final_query(answer, chain, answer_profile)
+            self.log(f"  [final] query={query}")
+            self.log("  [final] validating complex query")
             validation = self.validate_final_query(answer, query, chain)
             if answer and answer in query:
                 validation.is_valid = False
                 validation.is_answer_supported = False
                 validation.problems.append("query directly contains the final answer")
+            self.log(
+                f"  [final] valid={validation.is_valid} "
+                f"supported={validation.is_answer_supported} "
+                f"unique={validation.is_unique} "
+                f"confidence={validation.confidence:.2f}"
+            )
+            self.log(f"  [final] reason={validation.reason}")
 
             success = (
                 validation.is_valid
@@ -320,10 +345,15 @@ class DataSynthesizer:
                 answer_profile=answer_profile,
                 rejected=rejected,
             )
+            self.log(f"    [hop {hop_id}] generated_candidates={len(candidates)}")
 
             for candidate in candidates[: self.config.max_candidates_per_hop]:
                 if not candidate.new_focus or not candidate.question_to_current:
                     continue
+                self.log(
+                    f"    [candidate] new_focus={candidate.new_focus} "
+                    f"search_query={candidate.search_query}"
+                )
                 if candidate.new_focus == current_target or candidate.new_focus == answer:
                     rejected.append(
                         {
@@ -333,10 +363,17 @@ class DataSynthesizer:
                             "confidence": 0.0,
                         }
                     )
+                    self.log("    [candidate] rejected: duplicated target")
                     continue
 
                 evidence = self.collect_search_evidence(candidate.search_query or candidate.question_to_current)
+                self.log(f"    [candidate] evidence_count={len(evidence)}")
                 verified_hop = self.validate_hop(candidate, evidence)
+                self.log(
+                    f"    [candidate] verified={verified_hop.verified} "
+                    f"confidence={verified_hop.confidence:.2f} "
+                    f"reason={verified_hop.reason}"
+                )
                 if (
                     verified_hop.verified
                     and verified_hop.confidence >= self.config.min_hop_confidence
@@ -423,11 +460,17 @@ class DataSynthesizer:
         evidence: List[Evidence] = []
         for engine in self.config.search_engines:
             try:
+                self.log(f"      [search] engine={engine} query={search_query}")
                 response = self.search_client.search(search_query, engine)
+                self.log(
+                    f"      [search] engine={engine} results={len(response.results)} "
+                    f"time={response.elapsed_seconds:.2f}s"
+                )
                 evidence.extend(
                     compact_evidence(response, limit=self.config.search_results_per_engine)
                 )
             except Exception as exc:
+                self.log(f"      [search] engine={engine} error={repr(exc)}")
                 evidence.append(
                     Evidence(
                         engine=engine,
@@ -654,12 +697,13 @@ def main() -> int:
     parser.add_argument("--min-hop-confidence", type=float, default=0.75)
     parser.add_argument("--min-final-confidence", type=float, default=0.75)
     parser.add_argument("--no-fuzzification", action="store_true")
+    parser.add_argument("--verbose", action="store_true", help="print synthesis progress details")
     args = parser.parse_args()
 
     answers = read_answers(args)
     config = build_config(args)
 
-    with DataSynthesizer(config=config) as synthesizer:
+    with DataSynthesizer(config=config, verbose=args.verbose) as synthesizer:
         with open(args.output, "a", encoding="utf-8") as output_file:
             for index, answer in enumerate(answers, start=1):
                 print(f"[{index}/{len(answers)}] synthesize answer: {answer}")
