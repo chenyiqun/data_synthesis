@@ -5,13 +5,15 @@ BRANCH="${GIT_BRANCH:-main}"
 REMOTE="${GIT_REMOTE:-origin}"
 REPO_URL="${REPO_URL:-https://github.com/chenyiqun/data_synthesis.git}"
 
-cd "$(dirname "$0")"
+echo "[INFO] repo url: $REPO_URL"
+echo "[INFO] branch  : $BRANCH"
+echo "[INFO] cwd     : $(pwd)"
 
 if [ ! -d ".git" ]; then
-  echo "Error: this directory is not a cloned git repository."
-  echo "Clone first:"
-  echo "  git clone $REPO_URL"
-  echo "  cd data_synthesis"
+  echo "[ERROR] Current directory is not a git repository."
+  echo "If you want to clone first, run this from the parent directory:"
+  echo "  cd .."
+  echo "  git clone --branch $BRANCH $REPO_URL data_synthesis"
   exit 1
 fi
 
@@ -20,13 +22,18 @@ if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
 fi
 
 if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
-  echo "Error: local changes exist on the server. Commit, stash, or remove them before syncing."
+  echo "[ERROR] Local changes exist. Commit, stash, or remove them before syncing."
   git status --short
   exit 1
 fi
 
+echo "[INFO] Fetching latest code..."
 git fetch "$REMOTE" "$BRANCH"
+
+echo "[INFO] Checking out branch..."
 git checkout "$BRANCH"
+
+echo "[INFO] Pulling latest code..."
 git pull --ff-only "$REMOTE" "$BRANCH"
 
-echo "Synced latest code from $REMOTE/$BRANCH successfully."
+echo "[INFO] Synced latest code from $REMOTE/$BRANCH successfully."
